@@ -4,6 +4,8 @@ Everything in Omarchy happens via the keyboard — _EVERYTHING!_ When the system
 
 But the Omarchy menu is not even intended to be the main way to operate the system most of the time. We can get faster than that! All the most important applications are bound directly to individual hotkeys. You start the terminal with `Super + Return` and a browser with `Super + Shift + Return`. Try doing one after the other, and you'll see the magic of Hyprland's tiling in action:
 
+You can choose which entries appear in menu search under **Setup → Menu entries**. Each entry remembers its own setting; hiding a section also hides its contents until you show that section again. Turn on **Trigger → Toggle → Unhide all menu entries** to explore the full catalog, including options that need hardware or packages you do not have. Unavailable actions stay disabled. Use the manager's filter to find an entry within its menu hierarchy.
+
  ![navigation-browser-terminal](images/navigation-browser-terminal.webp)
 
 You can then hit `Super + J` to stack them on top of each other instead of side by side:

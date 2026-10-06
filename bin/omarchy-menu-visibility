@@ -1,0 +1,253 @@
+#!/bin/bash
+
+# omarchy:summary=Manage menu visibility and review menu changes
+# omarchy:hidden=true
+
+set -euo pipefail
+
+config="$HOME/.config/omarchy/menu-visibility.json"
+state_dir="$HOME/.local/state/omarchy/menu"
+history="$state_dir/history.json"
+lock="$state_dir/lock"
+mkdir -p "${config%/*}" "$state_dir"
+touch "$lock"
+exec 9>"$lock"
+flock 9
+
+usage() {
+  cat <<'USAGE'
+Usage: omarchy-menu-visibility <get|set-hidden|set-option|toggle-global|reconcile|scan-releases|prompt|notify|history|review|acknowledge>
+USAGE
+}
+
+jsonc_to_json() {
+  sed -E '/^[[:space:]]*\/\//d; s/,[[:space:]]*([}\]])/\1/g' "$1"
+}
+
+read_config() {
+  if [[ -s $config ]]; then jq -ce 'select(type == "object")' "$config"; else printf '{}\n'; fi
+}
+
+read_history() {
+  if [[ -s $history ]]; then jq -ce 'select(type == "object")' "$history"; else printf '{"snapshot":{},"events":[],"pending":[]}\n'; fi
+}
+
+atomic_json() {
+  local destination="$1" value="$2" temporary
+  mkdir -p "${destination%/*}"
+  temporary=$(mktemp "${destination}.XXXXXX")
+  printf '%s\n' "$value" >"$temporary"
+  chmod 600 "$temporary"
+  mv -f "$temporary" "$destination"
+}
+
+default_json=$(jsonc_to_json "$OMARCHY_PATH/default/omarchy/omarchy-menu.jsonc")
+version=$(tr -d '\n' <"$OMARCHY_PATH/version" 2>/dev/null || true)
+version=${version:-unknown}
+
+case ${1:-} in
+get)
+  read_config
+  ;;
+set-hidden)
+  (($# == 3)) || { usage >&2; exit 2; }
+  [[ $2 =~ ^[a-zA-Z0-9._-]+$ && ($3 == true || $3 == false) ]] || exit 2
+  current=$(read_config)
+  next=$(jq -c --arg id "$2" --argjson value "$3" '.hidden = (.hidden // {}) | .hidden[$id] = $value' <<<"$current")
+  atomic_json "$config" "$next"
+  echo ok
+  ;;
+set-option)
+  (($# == 3)) || { usage >&2; exit 2; }
+  [[ $2 == notifications || $2 == reviews || $2 == globalUnhide ]] && [[ $3 == true || $3 == false ]] || exit 2
+  current=$(read_config)
+  next=$(jq -c --arg key "$2" --argjson value "$3" '.[$key] = $value' <<<"$current")
+  atomic_json "$config" "$next"
+  echo ok
+  ;;
+reconcile)
+  # Do not read a menu while pacman or Omarchy is replacing its source files.
+  if [[ -e /var/lib/pacman/db.lck || -n ${OMARCHY_UPDATE_LOCK_FD:-} ]]; then exit 0; fi
+
+  incoming=$(jq -c 'with_entries(.value |= if type == "object" then del(.previousIds) else {} end)' <<<"$default_json")
+  prior=$(read_history)
+  previous=$(jq -c '.snapshot // {}' <<<"$prior")
+  config_json=$(read_config)
+  extension="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
+  extension_json='{}'
+  if [[ -f $extension ]]; then
+    extension_json=$(jsonc_to_json "$extension" 2>/dev/null) || extension_json='{}'
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$extension_json" || extension_json='{}'
+  fi
+  current_actions=$(jq -cn --argjson menu "$incoming" --argjson extension "$extension_json" '
+    reduce ($menu | keys[]) as $id ({}; .[$id] = (if $extension[$id].action? != null then $extension[$id].action else ($menu[$id].action // "") end))')
+  previous_actions=$(jq -c '.actions // {}' <<<"$prior")
+  has_baseline=$(jq 'has("snapshot")' <<<"$prior")
+  events='[]'
+  pending=$(jq -c '.pending // []' <<<"$prior")
+  today=$(date +%F)
+  scan_since=$(jq -r '.scanSince // empty' <<<"$prior")
+  [[ -n $scan_since ]] || scan_since=$(date -u +%F)
+  added=$(jq -cn --argjson old "$previous" --argjson new "$incoming" --argjson baseline "$has_baseline" '[ $new | keys[] as $id | select($baseline and $old[$id] == null) | {kind:"added",id:$id,new:$new[$id]} ]')
+  removed=$(jq -cn --argjson old "$previous" --argjson new "$incoming" --argjson baseline "$has_baseline" '[ $old | keys[] as $id | select($baseline and $new[$id] == null) | {kind:"removed",id:$id,old:$old[$id]} ]')
+  modified=$(jq -cn --argjson old "$previous" --argjson new "$incoming" '[ $new | keys[] as $id | select($old[$id] != null and $old[$id] != $new[$id]) | {kind:"modified",id:$id,old:$old[$id],new:$new[$id]} ]')
+  renames=$(jq -cn --argjson old "$previous" --argjson new "$default_json" '
+    [ $new | to_entries[] as $entry | $entry.value.previousIds[]? as $oldId | select($old[$oldId] != null) | {kind:"renamed",from:$oldId,id:$entry.key,old:$old[$oldId],new:$entry.value} ]')
+  if [[ $(jq 'length' <<<"$renames") != 0 ]]; then
+    while IFS=$'\t' read -r old_id new_id; do
+      [[ -n $old_id && -n $new_id ]] || continue
+      old_hidden=$(jq -r --arg id "$old_id" '.hidden[$id] // false' <<<"$config_json")
+      if [[ $old_hidden == true ]]; then config_json=$(jq -c --arg id "$old_id" --arg new "$new_id" '.hidden[$new] = .hidden[$id] | del(.hidden[$id])' <<<"$config_json"); fi
+      # Preserve independently hidden descendants when a declared submenu id
+      # changes, by applying the same explicit old/new prefix mapping.
+      while IFS= read -r hidden_id; do
+        [[ $hidden_id == "$old_id."* ]] || continue
+        mapped="$new_id${hidden_id#"$old_id"}"
+        config_json=$(jq -c --arg old "$hidden_id" --arg new "$mapped" '.hidden[$new] = .hidden[$old] | del(.hidden[$old])' <<<"$config_json")
+      done < <(jq -r '.hidden // {} | keys[]' <<<"$config_json")
+    done < <(jq -r '.[] | [.from,.id] | @tsv' <<<"$renames")
+    atomic_json "$config" "$config_json"
+    added=$(jq -cn --argjson changes "$added" --argjson renames "$renames" '[ $changes[] as $change | select(all($renames[]; .id != $change.id)) | $change ]')
+    removed=$(jq -cn --argjson changes "$removed" --argjson renames "$renames" '[ $changes[] as $change | select(all($renames[]; .from != $change.id)) | $change ]')
+  fi
+
+  if [[ $(jq 'length' <<<"$added") != 0 || $(jq 'length' <<<"$removed") != 0 || $(jq 'length' <<<"$modified") != 0 || $(jq 'length' <<<"$renames") != 0 ]]; then
+    events=$(jq -cn --arg date "$today" --arg version "$version" --argjson added "$added" --argjson removed "$removed" --argjson modified "$modified" --argjson renames "$renames" '[ $added[] | . + {date:$date,version:$version} ] + [ $removed[] | . + {date:$date,version:$version} ] + [ $modified[] | . + {date:$date,version:$version} ] + [ $renames[] | . + {date:$date,version:$version} ]')
+
+    # A changed action that remains effectively hidden needs a human review.
+    review_changes=$(jq -cn --argjson modified "$modified" --argjson renames "$renames" --argjson oldActions "$previous_actions" --argjson newActions "$current_actions" '
+      [$modified[] | select(.old.action != .new.action) | {id:.id,oldAction:($oldActions[.id] // .old.action),newAction:($newActions[.id] // .new.action)}] +
+      [$renames[] | {id:.id,oldAction:($oldActions[.from] // .old.action),newAction:($newActions[.id] // .new.action)}]')
+    new_pending=$(jq -cn --argjson changes "$review_changes" --argjson prefs "$config_json" --arg version "$version" '
+      def hidden($id): ($prefs.hidden[$id] // false) or (($id | split(".")) as $parts | [range(1; ($parts|length)) as $n | ($parts[0:$n] | join(".")) as $parent | $prefs.hidden[$parent] // false] | any);
+      [ $changes[] | select(.oldAction != .newAction and hidden(.id)) | . + {reviewKey:("action:" + .id + ":" + $version + ":" + .newAction)} ]')
+    new_pending=$(jq -c --arg date "$today" --arg version "$version" 'map(.date=$date | .version=$version)' <<<"$new_pending")
+    pending=$(jq -cn --argjson old "$pending" --argjson new "$new_pending" '$old + [ $new[] as $event | select(all($old[]; .reviewKey != $event.reviewKey)) | $event ]')
+
+    # New entries must appear even beneath a hidden parent. Preserve the
+    # existing effective subtree choice explicitly before revealing that
+    # ancestor, so older siblings do not unexpectedly become visible.
+    new_ids=$(jq -r '.[].id' <<<"$added")
+    while IFS= read -r id; do
+      [[ -n $id ]] || continue
+      parent=${id%.*}
+      [[ $parent != "$id" ]] || parent=""
+        while [[ -n $parent ]]; do
+          if [[ $(jq -r --arg id "$parent" '.hidden[$id] // false' <<<"$config_json") == true ]]; then
+            while IFS= read -r prior_id; do
+              [[ -n $prior_id && $prior_id == "$parent."* ]] || continue
+              config_json=$(jq -c --arg id "$prior_id" '.hidden[$id] = (.hidden[$id] // true)' <<<"$config_json")
+            done < <(jq -r --arg parent "$parent" '.snapshot | keys[] | select(startswith($parent + "."))' <<<"$prior")
+            config_json=$(jq -c --arg id "$parent" '.hidden[$id]=false' <<<"$config_json")
+          atomic_json "$config" "$config_json"
+        fi
+        if [[ $parent == *.* ]]; then parent=${parent%.*}; else parent=""; fi
+      done
+    done <<<"$new_ids"
+  fi
+
+  new_state=$(jq -cn --argjson prior "$prior" --argjson events "$events" --argjson pending "$pending" --argjson snapshot "$incoming" --argjson actions "$current_actions" --arg scanSince "$scan_since" --arg observed "$today" '
+    {snapshot:$snapshot, events:(($prior.events // []) + $events), pending:$pending, actions:$actions, reviewed:($prior.reviewed // []), scanSince:$scanSince, observed:$observed}')
+  atomic_json "$history" "$new_state"
+  if [[ $(jq 'length' <<<"$events") -gt 0 ]]; then
+    jq -c '{date,version,kind,id,old,new}' <<<"$events"
+  fi
+  ;;
+  scan-releases)
+  # A public release-note lookup is best effort. Search literal Omarchy command
+  # names already present in saved-hidden actions; never evaluate note text.
+  extension="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
+  if [[ -f $extension ]]; then
+    extension_json=$(jsonc_to_json "$extension" 2>/dev/null) || extension_json='{}'
+    jq -e 'type == "object"' >/dev/null 2>&1 <<<"$extension_json" || extension_json='{}'
+    effective_menu=$(jq -cn --argjson defaults "$default_json" --argjson extension "$extension_json" '$defaults | with_entries(.value += ($extension[.key] // {}))')
+  else
+    effective_menu=$default_json
+  fi
+  command_names=$(jq -r --argjson prefs "$(read_config)" '
+    def hidden($id): ($prefs.hidden[$id] // false) or (($id | split(".")) as $parts | [range(1; ($parts|length)) as $n | ($parts[0:$n] | join(".")) as $parent | $prefs.hidden[$parent] // false] | any);
+    keys[] as $id | select(hidden($id)) | .[$id].action // "" | scan("omarchy-[a-z0-9-]+")[]' <<<"$effective_menu" | sort -u)
+  [[ -n $command_names ]] || exit 0
+  releases=$(curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+    -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+    'https://api.github.com/repos/omacom/omarchy/releases?per_page=20' 2>/dev/null) || exit 0
+  prefs=$(read_config)
+  current=$(read_history)
+  while IFS= read -r name; do
+    [[ -n $name ]] || continue
+    jq -c --arg name "$name" --argjson releases "$releases" --argjson prefs "$prefs" --argjson current "$current" '
+      def hidden($id): ($prefs.hidden[$id] // false) or (($id | split(".")) as $parts | [range(1; ($parts|length)) as $n | ($parts[0:$n] | join(".")) as $parent | $prefs.hidden[$parent] // false] | any);
+      . as $menu | keys[] as $id | select((.[$id].action // "") | contains($name)) | select(hidden($id)) |
+      $releases[] | select((.published_at[0:10] // "") >= ($current.scanSince // "")) | select((.body // "") | ascii_downcase | contains($name | ascii_downcase)) |
+      {id:$id,release:.tag_name,title:.name,url:.html_url,reviewKey:("release:" + $id + ":" + .tag_name),date:(.published_at[0:10]),version:.tag_name,note:((.body // "") | split("\n") | map(select(ascii_downcase | contains($name | ascii_downcase))) | join("\n"))}' \
+      <<<"$effective_menu" | while IFS= read -r record; do
+        [[ -n $record ]] || continue
+        current=$(read_history)
+        next=$(jq -c --argjson review "$record" 'if any(.reviewed[]?; . == $review.reviewKey) then . else .pending = (if any(.pending[]?; .id == $review.id) then [.pending[] | if .id == $review.id then .notes = ((.notes // []) + [$review] | unique_by(.release)) else . end] else (.pending + [$review]) end) end' <<<"$current")
+        atomic_json "$history" "$next"
+      done
+  done <<<"$command_names"
+  current=$(read_history)
+  next=$(jq -c --arg date "$(date -u +%F)" '.scanSince=$date' <<<"$current")
+  atomic_json "$history" "$next"
+  ;;
+  prompt)
+  [[ ${OMARCHY_UPDATE_UNATTENDED:-0} != 1 && -t 0 && -t 1 ]] || exit 0
+  reviews_enabled=$(read_config | jq -r '.reviews // true')
+  [[ $reviews_enabled == true ]] || exit 0
+  pending=$(read_history | jq -c '.pending // []')
+  jq -c '.[]' <<<"$pending" | while IFS= read -r review; do
+    id=$(jq -r '.id' <<<"$review")
+    old=$(jq -r '.oldAction // "(none)"' <<<"$review")
+    new=$(jq -r '.newAction // ([([.notes[]?.note] + [.note])[] | select(. != null)] | join("\n")) // "Release notes mention a command used by this entry."' <<<"$review")
+    title=$(jq -r '.title // "Menu command changed"' <<<"$review")
+    version=$(jq -r '.version // .release // ""' <<<"$review")
+    url=$(jq -r '.url // .notes[0].url // empty' <<<"$review")
+    gum style --border normal --padding '1 2' "Menu entry: $id" "Update: $version" "$title" "Previous: $old" "Current: $new" "$url" || continue
+    if gum confirm --default=true --affirmative 'Keep hidden' --negative 'Show entry' 'Keep this entry hidden?'; then
+      "$OMARCHY_PATH/bin/omarchy-menu-visibility" acknowledge "$id" hidden
+    else
+      prompt_status=$?
+      if (( prompt_status == 1 )); then
+        "$OMARCHY_PATH/bin/omarchy-menu-visibility" acknowledge "$id" visible
+      fi
+    fi
+  done
+  ;;
+toggle-global)
+  current=$(read_config)
+  enabled=$(jq -r '.globalUnhide // false' <<<"$current")
+  if [[ $enabled == true ]]; then value=false; else value=true; fi
+  next=$(jq -c --argjson value "$value" '.globalUnhide=$value' <<<"$current")
+  atomic_json "$config" "$next"
+  echo "$value"
+  ;;
+notify)
+  notifications_enabled=$(read_config | jq -r '.notifications // true')
+  [[ $notifications_enabled == true ]] || exit 0
+  [[ -n ${2:-} && $2 != '[]' ]] || exit 0
+  omarchy-notification-send -g '󰍜' 'Omarchy menu updated' 'See additions, removals, and changes in Menu changes.' \
+    --exec omarchy-launch-menu-changes || true
+  ;;
+history)
+  read_history | jq -c '{events:(.events // []),pending:(.pending // [])}'
+  ;;
+review)
+  read_history | jq -c '.pending // []'
+  ;;
+acknowledge)
+  (($# == 3)) || { usage >&2; exit 2; }
+  current=$(read_history)
+  read_config >/dev/null
+  if [[ $3 == visible ]]; then
+    prefs=$(read_config)
+    id=$2
+    while [[ $id == *.* ]]; do prefs=$(jq -c --arg id "$id" '.hidden[$id]=false' <<<"$prefs"); id=${id%.*}; done
+    atomic_json "$config" "$prefs"
+  fi
+  next=$(jq -c --arg id "$2" ' .reviewed = ((.reviewed // []) + [(.pending // [])[] | select(.id == $id) as $review | ($review.reviewKey // ("action:" + $review.id + ":" + $review.version + ":" + ($review.newAction // ""))), ($review.notes[]?.reviewKey // empty)]) | .pending = [(.pending // [])[] | select(.id != $id)]' <<<"$current")
+  atomic_json "$history" "$next"
+  echo ok
+  ;;
+*) usage >&2; exit 2 ;;
+esac

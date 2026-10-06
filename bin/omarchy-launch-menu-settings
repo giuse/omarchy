@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# omarchy:summary=Manage which Omarchy menu entries are visible
+
+exec omarchy-shell shell summon omarchy.menu-settings '{}'

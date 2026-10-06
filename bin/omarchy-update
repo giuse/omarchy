@@ -127,6 +127,13 @@ if [[ ${1:-} == "-y" ]] || omarchy-update-confirm; then
   omarchy-update-system-pkgs
 
   omarchy-migrate
+  if ! menu_changes=$(omarchy-menu-visibility reconcile); then
+    echo "Could not reconcile Omarchy menu changes; continuing the update."
+    menu_changes=""
+  fi
+  omarchy-menu-visibility scan-releases || true
+  omarchy-menu-visibility prompt || true
+  omarchy-menu-visibility notify "$menu_changes" || true
   omarchy-update-orphan-pkgs
 
   omarchy-update-analyze-logs

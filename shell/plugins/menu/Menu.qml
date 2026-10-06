@@ -51,6 +51,7 @@ Item {
   property string userMenuPath: Quickshell.env("HOME") + "/.config/omarchy/extensions/omarchy-menu.jsonc"
   property var defaultMenuItems: []
   property var userMenuItems: []
+  property var visibilityPreferences: ({hidden:{}, globalUnhide:false})
   property bool opened: false
   property string mode: "menu"
   readonly property bool dmenuActive: mode === "select" || mode === "input"
@@ -472,7 +473,7 @@ Item {
   // submenus are also hidden when none of their descendants are visible;
   // provider-backed menus stay visible because their rows load on demand.
   function isVisible(entry) {
-    return MenuModel.isVisible(root.items, root.itemOrder, root.whenResults, entry)
+    return MenuModel.isVisibleForUser(root.items, root.itemOrder, root.whenResults, entry, root.visibilityPreferences.hidden, root.visibilityPreferences.globalUnhide)
   }
 
   // Label with the ✓ marker baked in when `checked:` or `disabled:` evaluated
@@ -504,14 +505,14 @@ Item {
   // Rows whose `disabled:` evaluated truthy stay listed but dimmed, and the
   // cursor steps over them.
   function isDisabled(entry) {
-    return MenuModel.isDisabled(root.disabledResults, entry)
+    return MenuModel.isDisabled(root.disabledResults, entry) || (root.visibilityPreferences.globalUnhide && !!(entry && entry.when && root.whenResults[entry.id] !== true))
   }
 
   // A disabled row earns its place in the submenu it belongs to, where the
   // list around it is the point. Search is a list of what you can do, so it
   // leaves them out.
   function matchesQuery(entry, query) {
-    return MenuModel.matchesQuery(entry, query, root.isVisible(entry) && !root.isDisabled(entry))
+    return MenuModel.matchesQuery(entry, query, root.isVisible(entry) && (!root.isDisabled(entry) || root.visibilityPreferences.globalUnhide))
   }
 
   function searchScore(entry, query) {
@@ -519,7 +520,9 @@ Item {
   }
 
   function displayRow(entry, detail, score, section) {
-    return MenuModel.displayRow(root.items, root.itemOrder, root.checkedResults, root.disabledResults, entry, detail, score, section)
+    var row = MenuModel.displayRow(root.items, root.itemOrder, root.checkedResults, root.disabledResults, entry, detail, score, section)
+    if (root.visibilityPreferences.globalUnhide && root.isDisabled(entry)) row.disabled = true
+    return row
   }
 
   function rowSelectable(index) {
@@ -982,6 +985,38 @@ Item {
     onLoaded: { root.userMenuItems = root.parseMenuJsonc(text()); root.rebuildItemsFromSources() }
     onLoadFailed: { root.userMenuItems = []; root.rebuildItemsFromSources() }
     onFileChanged: reload()
+  }
+
+  FileView {
+    id: visibilityFile
+    path: Quickshell.env("HOME") + "/.config/omarchy/menu-visibility.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      try { root.visibilityPreferences = JSON.parse(text()) }
+      catch (e) { root.visibilityPreferences = {hidden:{}, globalUnhide:false} }
+      if (root.rowsLoaded) root.rebuildDisplay()
+    }
+    onLoadFailed: {
+      root.visibilityPreferences = {hidden:{}, globalUnhide:false}
+      if (root.rowsLoaded) root.rebuildDisplay()
+    }
+    onFileChanged: reload()
+  }
+
+  Process {
+    id: reconcileVisibility
+    command: ["omarchy-menu-visibility", "reconcile"]
+    running: true
+    stdout: StdioCollector { id: visibilityChangesOutput }
+    onExited: if (visibilityChangesOutput.text.trim()) {
+      notifyVisibilityChanges.command = ["omarchy-menu-visibility", "notify", visibilityChangesOutput.text]
+      notifyVisibilityChanges.running = true
+    }
+  }
+
+  Process {
+    id: notifyVisibilityChanges
   }
 
   // ---------------------------------------------------------------- guards

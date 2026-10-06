@@ -13,6 +13,7 @@ function normalizeAliases(value) {
 function normalizeItem(id, raw) {
   var value = raw || {}
   var aliases = normalizeAliases(value.aliases)
+  var declared = Object.keys(value)
   var parent = value.parent
   if (parent === undefined)
     parent = id.indexOf(".") >= 0 ? id.split(".").slice(0, -1).join(".") : "root"
@@ -35,7 +36,9 @@ function normalizeItem(id, raw) {
     aliases: aliases,
     when: value.when || "",
     checked: value.checked || "",
-    disabled: value.disabled || ""
+    disabled: value.disabled || "",
+    previousIds: Array.isArray(value.previousIds) ? value.previousIds : [],
+    _declared: declared
   }
 }
 
@@ -73,12 +76,23 @@ function mergeMenuSources(defaultItems, userItems) {
     for (var i = 0; i < src.length; i++) {
       var entry = src[i]
       if (!entry || !entry.id) continue
-      if (!nextItems[entry.id]) nextOrder.push(entry.id)
+      var isNew = !nextItems[entry.id]
+      if (isNew) nextOrder.push(entry.id)
       var prior = nextItems[entry.id] || {}
       var merged = {}
       for (var k in prior) merged[k] = prior[k]
-      for (var k2 in entry) merged[k2] = entry[k2]
+      if (s === 0 || isNew) {
+        for (var k2 in entry) merged[k2] = entry[k2]
+      } else {
+        var declared = Array.isArray(entry._declared) ? entry._declared : Object.keys(entry)
+        for (var d = 0; d < declared.length; d++) {
+          var key = declared[d]
+          if (key === "previousIds") continue
+          if (entry[key] !== undefined) merged[key] = entry[key]
+        }
+      }
       merged.id = entry.id
+      merged.kind = merged.action ? "action" : (merged.target ? "link" : "menu")
       nextItems[entry.id] = merged
     }
   }
@@ -269,6 +283,81 @@ function isVisible(items, itemOrder, whenResults, entry, depth) {
   }
 
   return false
+}
+
+// User preferences hide the matched entry and everything below a hidden
+// ancestor. Keep this separate from availability guards so discovery mode can
+// reveal the whole shipped catalog without changing either set of preferences.
+function isHidden(hidden, items, entry) {
+  if (!entry) return false
+  var current = entry
+  var guard = 0
+  while (current && current.id !== "root" && guard++ < 64) {
+    if (hidden && hidden[current.id]) return true
+    current = item(items, current.parent)
+  }
+  return false
+}
+
+function isVisibleForUser(items, itemOrder, whenResults, entry, hidden, revealAll) {
+  if (!entry) return false
+  if (!revealAll && isHidden(hidden, items, entry)) return false
+  if (!revealAll && entry.when && whenResults && whenResults[entry.id] === false) return false
+  if (!revealAll && entry.kind === "link") {
+    var linked = item(items, entry.target)
+    if (!linked || isHidden(hidden, items, linked)) return false
+  }
+  if (revealAll) return true
+  if (entry.kind !== "menu" && entry.kind !== "link") return true
+  if (entry.provider) return true
+  var target = entry.kind === "link" ? entry.target : entry.id
+  var order = Array.isArray(itemOrder) ? itemOrder : []
+  for (var i = 0; i < order.length; i++) {
+    var child = item(items, order[i])
+    if (child && child.parent === target && isVisibleForUser(items, itemOrder, whenResults, child, hidden, false)) return true
+  }
+  return false
+}
+
+function isSelectableForUser(entry, whenResults, disabledResults, revealAll) {
+  if (!entry) return false
+  if (isDisabled(disabledResults, entry)) return false
+  if (revealAll && entry.when && whenResults && whenResults[entry.id] === false) return false
+  return true
+}
+
+function visibilityRows(items, itemOrder, query) {
+  var order = Array.isArray(itemOrder) ? itemOrder : []
+  var needle = String(query || "").trim().toLowerCase()
+  var excluded = ({})
+  for (var i = 0; i < order.length; i++) {
+    var entry = item(items, order[i])
+    if (entry && (entry.id === "apps" || entry.provider === "apps" || excluded[entry.parent])) excluded[entry.id] = true
+  }
+  var matches = ({})
+  if (needle) {
+    for (var j = 0; j < order.length; j++) {
+      var candidate = item(items, order[j])
+      if (!candidate || candidate.id === "root" || excluded[candidate.id] || candidate.id.indexOf("apps.") === 0) continue
+      var text = (candidate.label + " " + searchableToken(candidate.id) + " " + candidate.description).toLowerCase()
+      if (text.indexOf(needle) >= 0) {
+        matches[candidate.id] = true
+        var parent = item(items, candidate.parent)
+        while (parent && parent.id !== "root") {
+          matches[parent.id] = true
+          parent = item(items, parent.parent)
+        }
+      }
+    }
+  }
+  var rows = []
+  for (var k = 0; k < order.length; k++) {
+    var row = item(items, order[k])
+    if (!row || row.id === "root" || excluded[row.id] || row.id.indexOf("apps.") === 0) continue
+    if (needle && !matches[row.id]) continue
+    rows.push({id:row.id, label:row.label, parent:row.parent, depth:depthFor(items,row.id), kind:row.kind, description:row.description})
+  }
+  return rows
 }
 
 // A `disabled:` row stays listed but goes dim and unselectable. The
@@ -514,6 +603,10 @@ if (typeof module !== "undefined") {
     swapProviderRows: swapProviderRows,
     item: item,
     resolveRoute: resolveRoute,
+    isHidden: isHidden,
+    isVisibleForUser: isVisibleForUser,
+    isSelectableForUser: isSelectableForUser,
+    visibilityRows: visibilityRows,
     slugify: slugify,
     depthFor: depthFor,
     pathFor: pathFor,

@@ -92,6 +92,7 @@
   "trigger.toggle.crash-capture": {"icon":"󱚡","label":"Crash Capture","action":"omarchy-toggle-crash-capture"},
   "trigger.toggle.screensaver": {"icon":"󱄄","label":"Screensaver","action":"omarchy-toggle-screensaver"},
   "trigger.toggle.theme-sync": {"icon":"󰸌","label":"Herdr Theme Sync","when":"omarchy-theme-set-herdr-machines --available","action":"omarchy-toggle-theme-sync"},
+  "trigger.toggle.menu-discovery": {"icon":"󰍜","label":"Unhide all menu entries","description":"Explore every menu option, including unavailable entries","action":"omarchy-toggle-menu-visibility"},
   "trigger.toggle.nightlight": {"icon":"󰔎","label":"Nightlight","action":"omarchy-toggle-nightlight"},
   "trigger.toggle.top-bar": {"icon":"󰍜","label":"Menu Bar","action":"omarchy-toggle-bar"},
   "trigger.toggle.battery-percentage": {"icon":"󰁹","label":"Battery Percentage","when":"omarchy-hw-laptop","action":"omarchy-shell omarchy.power togglePercentage"},
@@ -125,6 +126,7 @@
   "style.screensaver.default": {"icon":"","label":"Restore Default","action":"omarchy-branding-screensaver reset"},
 
   // Setup
+  "setup.menu-entries": {"icon":"󰍜","label":"Menu entries","description":"Choose which menu entries appear in search","action":"omarchy-launch-menu-settings"},
   "setup.monitors": {"icon":"󰍹","label":"Monitors","action":"omarchy-launch-config-editor \"$HOME/.config/hypr/monitors.lua\""},
   "setup.keybindings": {"icon":"","label":"Keybindings","when":"[[ -f ~/.config/hypr/bindings.lua ]]","action":"omarchy-launch-config-editor \"$HOME/.config/hypr/bindings.lua\""},
   "setup.input": {"icon":"","label":"Input","when":"[[ -f ~/.config/hypr/input.lua ]]","action":"omarchy-launch-config-editor \"$HOME/.config/hypr/input.lua\""},
@@ -356,6 +358,7 @@
   "remove.development.elixir.phoenix": {"icon":"","label":"Phoenix","when":"[[ -d $HOME/.local/share/mise/installs/elixir ]]","action":"omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env phoenix'"},
 
   // Update
+  "update.menu-changes": {"icon":"󰍜","label":"Menu changes","description":"Review additions, removals, and changes by update date","action":"omarchy-launch-menu-changes"},
   "update.omarchy": {"icon":"","iconFont":"omarchy","label":"Omarchy","action":"omarchy-launch-floating-terminal-with-presentation omarchy-update"},
   "update.channel": {"icon":"󰔫","label":"Channel"},
   "update.config": {"icon":"","label":"Config","title":"Reset to default"},

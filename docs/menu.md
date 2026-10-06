@@ -42,6 +42,11 @@ submenu. The fields:
 | `aliases` | Alternate `omarchy menu summon <name>` routes; also searchable |
 | `description` | Subtitle shown while searching, and extra search text matched by whole word |
 | `when` / `checked` / `disabled` | Shell conditions (see Guards) |
+| `previousIds` | Old menu ids explicitly replaced by this entry; preserves visibility when an id changes |
+
+Declare `previousIds` on a shipped entry when changing its id. A label change
+on a stable id preserves the user's choice automatically. An id change without
+this explicit mapping is recorded as a removal and an addition.
 
 Do not add `aliases` to new entries. They are reserved for established
 alternate names users already type (`power-menu`, `settings`), kept for
@@ -118,6 +123,42 @@ can point a submenu at an existing provider but cannot declare a new one:
 A provider marked `volatile` re-runs every time its submenu is entered — a
 font installed since the shell started shows up without a restart — but not
 on search keystrokes, which would restart the same enumeration per key.
+
+## Visibility and change history
+
+**Setup → Menu entries** opens a windowed manager for the defined menu tree.
+It preserves each row's choice by id; hiding a parent suppresses its subtree
+and disables descendant controls while leaving their choices saved. The
+manager omits Apps and generated provider rows. Its filter matches entry names,
+ids, and descriptions while retaining matching entries' ancestors.
+
+**Trigger → Toggle → Unhide all menu entries** reveals the shipped catalog,
+including choices hidden by availability guards and disabled package checks.
+Unavailable actions remain disabled. This discovery setting locks the manager's
+per-entry switches until turned off; their saved values are not changed.
+
+Visibility settings live in `~/.config/omarchy/menu-visibility.json`. Run
+`omarchy launch menu-settings` to open the manager even when its menu entry is
+hidden. Hiding Setup or Menu entries requires three confirmation toggles and
+shows this recovery command and settings path first.
+
+Menu changes are kept under `~/.local/state/omarchy/menu/history.json` and
+opened from **Update → Menu changes**. History records shipped additions,
+removals, renames, and modifications by update date and version. Local
+extension changes appear in the runtime menu but are not attributed to Omarchy
+releases. New entries start visible. If an update adds an entry beneath a
+hidden parent, Omarchy clears only the ancestor hiding needed to reveal it and
+records that change; previously hidden sibling choices under that parent may
+become visible too.
+
+Updates compare shipped menu definitions and search public Omarchy GitHub
+release notes for literal `omarchy-*` command names used by hidden entries.
+Changed commands and matching release notes create a review. The update shows
+the path and old/new command or matching release text and asks whether to keep
+the entry hidden; keeping it hidden is the default. Turning off hidden-command
+reviews queues them for the history window. Notification and review settings
+are independent and enabled by default. Release-note lookup is best effort and
+never blocks an update.
 
 `swapProviderRows` in `MenuModel.js` merges the results: rows carry the id of
 the submenu that produced them, so a provider that runs again drops its

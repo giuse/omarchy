@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# omarchy:summary=Toggle menu discovery mode to reveal every menu entry
+
+exec omarchy-menu-visibility toggle-global

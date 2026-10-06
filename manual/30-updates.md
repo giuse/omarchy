@@ -6,6 +6,16 @@ Omarchy itself is installed as regular pacman packages from the [Omarchy Package
 
 When new releases are made, a circle arrow icon will appear to the right of your clock. Click it and the update process will start.
 
+### Menu changes
+
+After an update, Omarchy can notify you when its menu changes. Open **Update → Menu changes** to see additions, removals, renames, and modifications by the date they were observed. You can also open this window at any time with `omarchy launch menu-changes`.
+
+When a hidden command changes, or its command name appears in release notes, the update explains the old and new command or shows the matching release text. Confirm that you want to keep it hidden; this is selected by default. Choose **Show entry** to make it visible. If hidden-command reviews are turned off, pending reviews remain available in the change history.
+
+Notification and hidden-command review settings are under **Setup → Menu entries**. Both are on by default. The review setting controls interaction; notifications control the separate update summary.
+
+If you hide the Menu entries manager or Setup, reopen it from a terminal with `omarchy launch menu-settings`. Its visibility settings live at `~/.config/omarchy/menu-visibility.json`.
+
 ![update-available](images/update-available.webp)
 
 ### Four channels

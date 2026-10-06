@@ -19,6 +19,7 @@ User-installed plugins live alongside these conceptually but on disk under
 | Clipboard mgr | `omarchy.clipboard`       | `overlay`               | `clipboard/Clipboard.qml`             |
 | Reminders     | `omarchy.reminders`       | `overlay`               | `reminders/ReminderFlow.qml`          |
 | Omarchy menu  | `omarchy.menu`            | `menu`, `bar-widget`    | `menu/Menu.qml`, `menu/BarWidget.qml` |
+| Menu entries  | `omarchy.menu-settings`   | `panel`                 | `menu-settings/MenuSettings.qml`      |
 | Notifications | `omarchy.notifications`   | `service`               | `notifications/Service.qml`           |
 | Audio         | `omarchy.audio`           | `bar-widget`            | `panels/audio/Panel.qml`              |
 | Bluetooth     | `omarchy.bluetooth`       | `bar-widget`            | `panels/bluetooth/Panel.qml`          |
@@ -116,6 +117,10 @@ bash expressions in a single batched subprocess, and executes the
 selected `action:` string directly via `Quickshell.execDetached`. The
 long-running shell process keeps the parsed menu in memory, so the
 keybind → IPC → visible path costs ~30ms cold.
+
+The Menu entries panel manages per-entry visibility and displays menu change
+history. **Setup → Menu entries** opens its manager; **Update → Menu changes**
+opens its history view through the `omarchy.menu-settings` plugin.
 
 ## Coming soon
 

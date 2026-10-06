@@ -28,6 +28,8 @@ The design goal is:
 | `~/.local/state/omarchy/migrations/` | user | Per-user migration markers. |
 | `~/.local/state/omarchy/reboot-required` | user | Optional reboot marker checked by `omarchy-update-restart`. |
 | `~/.local/state/omarchy/restart-*-required` | user | Optional service/app restart markers checked by `omarchy-update-restart`. The shell needs no marker: it is restarted unconditionally after every update. |
+| `~/.config/omarchy/menu-visibility.json` | user | Per-menu-id hidden preferences, discovery mode, notification, and hidden-command review settings. |
+| `~/.local/state/omarchy/menu/history.json` | user | Last observed shipped menu snapshot, dated change history, pending reviews, and reviewed release-note matches. |
 
 ## Migration layout
 
@@ -136,6 +138,8 @@ omarchy-update
   ├─ omarchy-update-stay-awake start
   ├─ run system-package updates
   ├─ run migrations
+  ├─ reconcile menu changes and search release notes for hidden commands
+  ├─ prompt for hidden-command review and notify about menu changes
   ├─ run orphan review and log analysis
   ├─ omarchy-update-status
   │    └─ refresh or clear the shell update indicator

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# omarchy:summary=View dated Omarchy menu changes
+
+exec omarchy-shell shell summon omarchy.menu-settings '{"view":"changes"}'

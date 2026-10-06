@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchy.menu-settings",
+  "name": "Menu entries",
+  "version": "1.0.0",
+  "author": "Omarchy",
+  "description": "Manage menu visibility and review menu changes",
+  "kinds": ["panel"],
+  "keepLoaded": true,
+  "entryPoints": {"panel": "MenuSettings.qml"}
+}
